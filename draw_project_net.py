@@ -12,10 +12,12 @@ from graphviz import Digraph
 import numpy as np
 import sympy as sp
 from itertools import combinations
+import matplotlib.pyplot as plt
+from collections import defaultdict
 
 
 # Ruta de entrada y salida
-input_folder = "/Users/cristiantobar/Library/CloudStorage/OneDrive-unicauca.edu.co/doctorado_cristian/doctorado_cristian/procesamiento_datos/experimentos_schedulings/datos_schedules_construccion"
+input_folder = "/Users/cristiantobar/Library/CloudStorage/OneDrive-unicauca.edu.co/doctorado_cristian/doctorado_cristian/procesamiento_datos/experimentos_schedulings/sifones_test"
 output_folder = "/Users/cristiantobar/Library/CloudStorage/OneDrive-unicauca.edu.co/doctorado_cristian/doctorado_cristian/procesamiento_datos/experimentos_schedulings/data_understanding/nets"
 
 # Asegurar que exista la carpeta de salida
@@ -75,6 +77,112 @@ def calcular_sifones_trampas(pre, post, places):
             resultados["sifones"].append(places[i])
 
     return resultados
+
+def calcular_sifones_trampas_formales(pre, post, places, max_subset_size= 5):
+    n_places, n_trans = pre.shape
+    resultados = {"sifones": [], "trampas": []}
+    conteo_por_tamano = defaultdict(lambda: {"sifones": 0, "trampas": 0})
+
+    print(f"Evaluando conjuntos de lugares (máximo tamaño = {max_subset_size})...")
+
+    
+    for k in range(1, n_places + 1):
+    #for k in range(1, min(max_subset_size + 1, n_places + 1)):
+        total_combs = len(list(combinations(range(n_places), k)))
+        print(f"  - Subconjuntos de tamaño {k}: {total_combs} combinaciones")
+        
+        #for subset in combinations(range(n_places), k):
+        for idx, subset in enumerate(combinations(range(n_places), k), start=1):
+
+            S = set(subset)
+
+            entrada_trans = {j for i in S for j in range(n_trans) if pre[i, j] > 0}
+            salida_trans = {j for i in S for j in range(n_trans) if post[i, j] > 0}
+
+            # Sifón: transiciones que consumen desde S también deben producir en S
+            if entrada_trans <= salida_trans:
+                resultados["sifones"].append([places[i] for i in S])
+                conteo_por_tamano[k]["sifones"] += 1
+
+            # Trampa: transiciones que producen en S también deben consumir desde S
+            if salida_trans <= entrada_trans:
+                resultados["trampas"].append([places[i] for i in S])
+                conteo_por_tamano[k]["trampas"] += 1
+            
+            if idx % 500 == 0:
+                print(f"    > Procesadas {idx} combinaciones de tamaño {k}...")
+            
+    print("✅ Cálculo de sifones y trampas completado.")
+        
+    # Métricas de resumen
+    n_sifones = len(resultados["sifones"])
+    n_trampas = len(resultados["trampas"])
+    tamano_prom_sifon = np.mean([len(s) for s in resultados["sifones"]]) if resultados["sifones"] else 0
+    tamano_prom_trampa = np.mean([len(t) for t in resultados["trampas"]]) if resultados["trampas"] else 0
+    tamano_max_sifon = max([len(s) for s in resultados["sifones"]]) if resultados["sifones"] else 0
+    tamano_max_trampa = max([len(t) for t in resultados["trampas"]]) if resultados["trampas"] else 0
+
+    # Visualización
+    tamanos = sorted(conteo_por_tamano.keys())
+    sifon_vals = [conteo_por_tamano[k]["sifones"] for k in tamanos]
+    trampa_vals = [conteo_por_tamano[k]["trampas"] for k in tamanos]
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(tamanos, sifon_vals, marker='o', label='Sifones')
+    plt.plot(tamanos, trampa_vals, marker='s', label='Trampas')
+    plt.title("Número de subconjuntos detectados como sifones o trampas por tamaño")
+    plt.xlabel("Tamaño del subconjunto")
+    plt.ylabel("Cantidad detectada")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+    return {
+        "sifones": resultados["sifones"],
+        "trampas": resultados["trampas"],
+        "n_sifones": n_sifones,
+        "n_trampas": n_trampas,
+        "tamano_prom_sifon": tamano_prom_sifon,
+        "tamano_prom_trampa": tamano_prom_trampa,
+        "tamano_max_sifon": tamano_max_sifon,
+        "tamano_max_trampa": tamano_max_trampa,
+        "conteo_por_tamano": conteo_por_tamano
+    }
+    
+    return resultados
+
+# Extraer indicadores
+def extraer_indicadores_por_proyecto(matrices_por_proyecto):
+    resumen = []
+    for nombre, datos in matrices_por_proyecto.items():
+        pre = datos["Pre"]
+        post = datos["Post"]
+        places = datos["places"]
+        transitions = datos["transitions"]
+        
+        componentes = calcular_componentes_C(pre, post, places, transitions)
+        sif_trap = calcular_sifones_trampas_formales(pre, post, places)
+        
+        
+        breakpoint()
+        entradas = pre.sum(axis=1)
+        salidas = post.sum(axis=1)
+        resumen.append({
+            "proyecto": nombre,
+            "n_places": len(places),
+            "n_transitions": len(transitions),
+            "n_t_componentes": len(componentes["t_componentes"]),
+            "n_p_componentes": len(componentes["p_componentes"]),
+            "n_sifones": len(sif_trap["sifones"]),
+            "n_trampas": len(sif_trap["trampas"]),
+            "norm_frobenius_C": np.linalg.norm(post - pre, ord='fro'),
+            "solo_entrada_places": int(np.sum((entradas > 0) & (salidas == 0))),
+            "solo_salida_places": int(np.sum((salidas > 0) & (entradas == 0))),
+            "intermedios_places": int(np.sum((entradas > 0) & (salidas > 0)))
+        })
+    return pd.DataFrame(resumen)
+
 
 # Diccionario para guardar matrices Pre y Post
 matrices_por_proyecto = {}
@@ -161,23 +269,25 @@ for file in os.listdir(input_folder):
                 "places": list(place_indices.keys()),
                 "transitions": list(transition_indices.keys())
             }
-            # Aplicar a un proyecto
-            pre = matrices_por_proyecto[file]["Pre"]
-            post = matrices_por_proyecto[file]["Post"]
-            places = matrices_por_proyecto[file]["places"]
-            transitions = matrices_por_proyecto[file]["transitions"]
+            # # Aplicar a un proyecto
+            # pre = matrices_por_proyecto[file]["Pre"]
+            # post = matrices_por_proyecto[file]["Post"]
+            # places = matrices_por_proyecto[file]["places"]
+            # transitions = matrices_por_proyecto[file]["transitions"]
             
-            # Calcular componentes y estructuras
-            componentes = calcular_componentes_C(pre, post, places, transitions)
-            estructuras = calcular_sifones_trampas(pre, post, places)
+            # # Calcular componentes y estructuras
+            # componentes = calcular_componentes_C(pre, post, places, transitions)
+            # estructuras = calcular_sifones_trampas(pre, post, places)
 
-            indicadores_estructurales[file] = {
-                "matriz_C": componentes["matriz_C"],
-                "T_componentes": componentes["t_componentes"],
-                "P_componentes": componentes["p_componentes"],
-                "Sifones": estructuras["sifones"],
-                "Trampas": estructuras["trampas"]
-            }
+            # indicadores_estructurales[file] = {
+            #     "matriz_C": componentes["matriz_C"],
+            #     "T_componentes": componentes["t_componentes"],
+            #     "P_componentes": componentes["p_componentes"],
+            #     "Sifones": estructuras["sifones"],
+            #     "Trampas": estructuras["trampas"]
+            # }
+            
+            df_indicadores = extraer_indicadores_por_proyecto(matrices_por_proyecto)
             
             # Guardar gráfico
             #filename_base = os.path.splitext(file)[0].replace(" ", "_")
@@ -186,3 +296,4 @@ for file in os.listdir(input_folder):
 
         except Exception as e:
             print(f"⚠️ Error procesando {file}: {e}")
+
