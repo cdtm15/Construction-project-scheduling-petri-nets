@@ -14,11 +14,24 @@ import sympy as sp
 from itertools import combinations
 import matplotlib.pyplot as plt
 from collections import defaultdict
+from sklearn.preprocessing import MinMaxScaler               # Para normalización
+from scipy.cluster.hierarchy import linkage, fcluster        # Para clustering jerárquico
+import matplotlib.pyplot as plt                              # Para visualización
+import seaborn as sns                                        # Para gráficos más estéticos
+from scipy.cluster.hierarchy import dendrogram, linkage
+from sklearn.metrics import silhouette_score
+from sklearn.utils import resample
+from sklearn.ensemble import RandomForestClassifier
 
 
 # Ruta de entrada y salida
 input_folder = "/Users/cristiantobar/Library/CloudStorage/OneDrive-unicauca.edu.co/doctorado_cristian/doctorado_cristian/procesamiento_datos/experimentos_schedulings/sifones_test"
+#input_folder = "/Users/cristiantobar/Library/CloudStorage/OneDrive-unicauca.edu.co/doctorado_cristian/doctorado_cristian/procesamiento_datos/experimentos_schedulings/datos_schedules_construccion" 
 output_folder = "/Users/cristiantobar/Library/CloudStorage/OneDrive-unicauca.edu.co/doctorado_cristian/doctorado_cristian/procesamiento_datos/experimentos_schedulings/data_understanding/nets"
+
+# Ruta del archivo excel consolidado de los proyectos
+ruta_consolidado_proj = "/Users/cristiantobar/Library/CloudStorage/OneDrive-unicauca.edu.co/doctorado_cristian/doctorado_cristian/procesamiento_datos/experimentos_schedulings/DSLIB_Analysis_Scheet.xlsx"
+df_consolidado_proj   = pd.read_excel(ruta_consolidado_proj, sheet_name='all_data_combining')  # Carga todas las hojas 
 
 # Asegurar que exista la carpeta de salida
 os.makedirs(output_folder, exist_ok=True)
@@ -152,6 +165,7 @@ def calcular_sifones_trampas_formales(pre, post, places, max_subset_size= 5):
     
     return resultados
 
+
 # Extraer indicadores
 def extraer_indicadores_por_proyecto(matrices_por_proyecto):
     resumen = []
@@ -162,10 +176,9 @@ def extraer_indicadores_por_proyecto(matrices_por_proyecto):
         transitions = datos["transitions"]
         
         componentes = calcular_componentes_C(pre, post, places, transitions)
-        sif_trap = calcular_sifones_trampas_formales(pre, post, places)
+        #sif_trap = calcular_sifones_trampas_formales(pre, post, places)
         
         
-        breakpoint()
         entradas = pre.sum(axis=1)
         salidas = post.sum(axis=1)
         resumen.append({
@@ -174,8 +187,8 @@ def extraer_indicadores_por_proyecto(matrices_por_proyecto):
             "n_transitions": len(transitions),
             "n_t_componentes": len(componentes["t_componentes"]),
             "n_p_componentes": len(componentes["p_componentes"]),
-            "n_sifones": len(sif_trap["sifones"]),
-            "n_trampas": len(sif_trap["trampas"]),
+            #"n_sifones": len(sif_trap["sifones"]),
+            #"n_trampas": len(sif_trap["trampas"]),
             "norm_frobenius_C": np.linalg.norm(post - pre, ord='fro'),
             "solo_entrada_places": int(np.sum((entradas > 0) & (salidas == 0))),
             "solo_salida_places": int(np.sum((salidas > 0) & (entradas == 0))),
@@ -183,6 +196,37 @@ def extraer_indicadores_por_proyecto(matrices_por_proyecto):
         })
     return pd.DataFrame(resumen)
 
+def bootstrap_rf_ct(X_encoded, y, uncert_source, lit):
+    
+    # === 4. Random Forest para feature importance + bootstrap ===
+    feature_counts_rf = defaultdict(int)
+    feature_importance_values = defaultdict(list)
+
+    n_iterations = 1000
+
+    for i in range(n_iterations):
+        X_resampled, y_resampled = resample(X_encoded, y, replace=True, random_state=42+i)
+        rf = RandomForestClassifier(n_estimators=100, random_state=42)
+        rf.fit(X_resampled, y_resampled)
+        
+        for idx, col in enumerate(X_encoded.columns):
+            imp = rf.feature_importances_[idx]
+            if imp > 0:
+                feature_counts_rf[col] += 1
+            feature_importance_values[col].append(imp)
+
+    # Consolidar en DataFrame
+    df_importancia_rf = pd.DataFrame({
+        'Feature': list(feature_counts_rf.keys()),
+        'Frequency': [feature_counts_rf[k] for k in feature_counts_rf.keys()],
+        'MeanImportance': [np.mean(feature_importance_values[k]) for k in feature_counts_rf.keys()],
+        'StdImportance': [np.std(feature_importance_values[k]) for k in feature_counts_rf.keys()]
+    }).sort_values(by='Frequency', ascending=False)
+    
+    # Ordenar por importancia
+    df_plot = df_importancia_rf.sort_values(by='MeanImportance', ascending=True)
+    
+    return df_plot
 
 # Diccionario para guardar matrices Pre y Post
 matrices_por_proyecto = {}
@@ -192,6 +236,7 @@ indicadores_estructurales = {}
 for file in os.listdir(input_folder):
     if file.endswith(".xlsx"):
         try:
+            
             file_path = os.path.join(input_folder, file)
             df = pd.read_excel(file_path, sheet_name="Baseline Schedule", header=1)
             df = df.iloc[1:].reset_index(drop=True)
@@ -211,7 +256,7 @@ for file in os.listdir(input_folder):
             # Crear grafo
             dot = Digraph(format='pdf')
             dot.attr(rankdir='LR')
-
+                        
             start_nodes = df[pd.isna(df['Predecessors'])]['ID'].astype(str).tolist()
             end_nodes = df[pd.isna(df['Successors'])]['ID'].astype(str).tolist()
 
@@ -251,7 +296,25 @@ for file in os.listdir(input_folder):
             # Crear matrices vacías
             pre = np.zeros((len(place_indices), len(transition_indices)), dtype=int)
             post = np.zeros((len(place_indices), len(transition_indices)), dtype=int)
-
+            
+            # if file == 'C2023-01 House renovation.xlsx':
+            #         # Rellenar matrices Pre y Post
+            #         for t_id, t_idx in transition_indices.items():
+                        
+            #                 match = re.match(r"T_(\d+)_(\d+)_", t_id)
+                            
+            #                 if match:
+            #                     p_from = f"P{match.group(1)}"
+            #                     p_to = f"P{match.group(2)}"
+                                
+            #                 try:
+            #                     if p_from in place_indices:
+            #                         pre[place_indices[p_from], t_idx] = 1
+            #                     if p_to in place_indices:
+            #                         post[place_indices[p_to], t_idx] = 1
+            #                 except Exception as e:
+            #                      breakpoint()
+                
             # Rellenar matrices Pre y Post
             for t_id, t_idx in transition_indices.items():
                 match = re.match(r"T_(\d+)_(\d+)_", t_id)
@@ -262,7 +325,7 @@ for file in os.listdir(input_folder):
                         pre[place_indices[p_from], t_idx] = 1
                     if p_to in place_indices:
                         post[place_indices[p_to], t_idx] = 1
-
+            
             matrices_por_proyecto[file] = {
                 "Pre": pre,
                 "Post": post,
@@ -296,4 +359,81 @@ for file in os.listdir(input_folder):
 
         except Exception as e:
             print(f"⚠️ Error procesando {file}: {e}")
+
+
+# Paso 1: Preparar los datos
+df_clean = df_indicadores.drop(columns=['proyecto'])
+scaler = MinMaxScaler()
+scaled = scaler.fit_transform(df_clean)
+
+# Paso 2: Calcular el linkage (si no lo has hecho ya)
+Z = linkage(scaled, method='ward')
+
+# Paso 3: Graficar el dendrograma
+plt.figure(figsize=(12, 6))
+dendrogram(Z, truncate_mode='lastp', p=30, leaf_rotation=90., leaf_font_size=10., show_contracted=True)
+plt.title("📊 Dendrograma (Método del Codo)")
+plt.xlabel("Proyectos (agrupados)")
+plt.ylabel("Distancia (Ward)")
+plt.tight_layout()
+plt.show()
+
+# Rango de valores de clusters a probar
+rango_clusters = range(2, 10)
+scores = []
+
+for k in rango_clusters:
+    etiquetas = fcluster(Z, t=k, criterion='maxclust')
+    score = silhouette_score(scaled, etiquetas)
+    scores.append(score)
+    print(f"Clusters: {k} → Silhouette Score: {score:.4f}")
+
+# Graficar los resultados
+plt.figure(figsize=(8, 5))
+plt.plot(rango_clusters, scores, marker='o')
+plt.title("🔍 Silhouette Score por número de clusters")
+plt.xlabel("Número de clusters")
+plt.ylabel("Silhouette Score")
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+df_clean = df_indicadores.drop('proyecto', axis=1)
+# Lista de variables a graficar
+variables = list(df_clean.columns)
+
+# # Normalización
+# scaler = MinMaxScaler()
+# scaled = scaler.fit_transform(df_clean)
+
+# # Clustering jerárquico
+# Z = linkage(scaled, method='ward')
+clusters = fcluster(Z, t=2, criterion='maxclust')
+
+# Asignar al df_clean
+df_clean["cluster"] = clusters
+df_indicadores["cluster"] = clusters
+
+# Paleta de colores personalizada para los clusters
+colores_clusters = sns.color_palette("Set2", n_colors=4)
+
+# Crear figura con subplots
+fig, axes = plt.subplots(4, 2, figsize=(14, 14))
+axes = axes.flatten()
+
+for i, var in enumerate(variables):
+    sns.boxplot(data=df_clean, x='cluster', y=var, ax=axes[i], palette=colores_clusters)
+    axes[i].set_title(f"Distribución de {var} por cluster")
+    axes[i].set_xlabel("Cluster")
+    axes[i].set_ylabel(var)
+
+plt.tight_layout()
+plt.show()
+
+# Seleccionar los dos primeros proyectos por cluster
+df_analizados = df_indicadores[['proyecto', 'cluster']].groupby('cluster').head(2).reset_index(drop=True)
+
+# Seleccionar solo columnas necesarias
+df_todos = df_indicadores[['proyecto', 'cluster']].sort_values(by='cluster').reset_index(drop=True)
+
 
