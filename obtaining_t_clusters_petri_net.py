@@ -18,8 +18,8 @@ from collections import defaultdict
 from pulp import LpProblem, LpMinimize, LpVariable, lpSum, LpInteger, LpStatus, value
 
 # Ruta de entrada y salida
-input_folder = "/Users/cristiantobar/Library/CloudStorage/OneDrive-unicauca.edu.co/doctorado_cristian/doctorado_cristian/procesamiento_datos/experimentos_schedulings/sifones_test"
-#input_folder = "/Users/cristiantobar/Library/CloudStorage/OneDrive-unicauca.edu.co/doctorado_cristian/doctorado_cristian/procesamiento_datos/experimentos_schedulings/datos_schedules_construccion" 
+#input_folder = "/Users/cristiantobar/Library/CloudStorage/OneDrive-unicauca.edu.co/doctorado_cristian/doctorado_cristian/procesamiento_datos/experimentos_schedulings/sifones_test"
+input_folder = "/Users/cristiantobar/Library/CloudStorage/OneDrive-unicauca.edu.co/doctorado_cristian/doctorado_cristian/procesamiento_datos/experimentos_schedulings/datos_schedules_construccion" 
 output_folder = "/Users/cristiantobar/Library/CloudStorage/OneDrive-unicauca.edu.co/doctorado_cristian/doctorado_cristian/procesamiento_datos/experimentos_schedulings/data_understanding/nets"
 
 # Ruta del archivo excel consolidado de los proyectos
@@ -67,7 +67,7 @@ def calcular_componentes_test(C, transitions, places):
     for vec in t_invariantes_enteros:
         bin_vec = [1 if v != 0 else 0 for v in vec]
         t_invariantes_binarios.append(bin_vec)
-
+            
     # -------------------------
     # P-INVARIANTES
     # -------------------------
@@ -106,9 +106,8 @@ def extraer_indicadores_por_proyecto(matrices_por_proyecto):
         transitions = datos["transitions"]
         
         C = post - pre
-        breakpoint()
-        componentes = calcular_componentes_test(C, places, transitions)
-                
+        componentes = calcular_componentes_test(C, transitions, places)
+
         entradas = pre.sum(axis=1)
         salidas = post.sum(axis=1)
         resumen.append({
@@ -132,13 +131,12 @@ indicadores_estructurales = {}
 
 # Este bloque solo funcionará si se cargan archivos Excel al entorno
 for file in os.listdir(input_folder):
-    if file.endswith(".xlsx"):
+    if file.endswith(".xlsx"): 
         try:
-            
             file_path = os.path.join(input_folder, file)
             df = pd.read_excel(file_path, sheet_name="Baseline Schedule", header=1)
             df = df.iloc[1:].reset_index(drop=True)
-
+    
             # Filtrar las filas que serán eliminadas (aquellas donde ambas columnas sean NaN)
             df = df[~df[['Predecessors', 'Successors']].isna().all(axis=1)]
             df = df.reset_index(drop=True)
@@ -157,7 +155,7 @@ for file in os.listdir(input_folder):
                         
             start_nodes = df[pd.isna(df['Predecessors'])]['ID'].astype(str).tolist()
             end_nodes = df[pd.isna(df['Successors'])]['ID'].astype(str).tolist()
-
+    
             # Añadir lugares
             for _, row in df.iterrows():
                 act_id = str(row["ID"])
@@ -172,7 +170,7 @@ for file in os.listdir(input_folder):
                     dot.node(place_id, label, shape='circle', style='filled', fillcolor='red')
                 else:
                     dot.node(place_id, label, shape='circle', style='filled', fillcolor='lightblue')
-
+    
             # Añadir transiciones
             for _, row in df.iterrows():
                 act_id = str(row["ID"])
@@ -230,15 +228,13 @@ for file in os.listdir(input_folder):
                 "places": list(place_indices.keys()),
                 "transitions": list(transition_indices.keys())
             }
-
+    
             df_indicadores = extraer_indicadores_por_proyecto(matrices_por_proyecto)
             # Guardar gráfico
             #filename_base = os.path.splitext(file)[0].replace(" ", "_")
             #output_path = os.path.join(output_folder, f"{filename_base}_petri_net")
             #dot.render(output_path, cleanup=True)
-
         except Exception as e:
-            breakpoint()
             print(f"⚠️ Error procesando {file}: {e}")
             
             
