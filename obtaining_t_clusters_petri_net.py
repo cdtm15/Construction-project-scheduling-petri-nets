@@ -15,12 +15,12 @@ import sympy as sp
 from itertools import combinations
 import matplotlib.pyplot as plt
 from collections import defaultdict
-from pulp import LpProblem, LpMinimize, LpVariable, lpSum, LpInteger, LpStatus, value
 
 # Ruta de entrada y salida
 #input_folder = "/Users/cristiantobar/Library/CloudStorage/OneDrive-unicauca.edu.co/doctorado_cristian/doctorado_cristian/procesamiento_datos/experimentos_schedulings/sifones_test"
 input_folder = "/Users/cristiantobar/Library/CloudStorage/OneDrive-unicauca.edu.co/doctorado_cristian/doctorado_cristian/procesamiento_datos/experimentos_schedulings/datos_schedules_construccion" 
 output_folder = "/Users/cristiantobar/Library/CloudStorage/OneDrive-unicauca.edu.co/doctorado_cristian/doctorado_cristian/procesamiento_datos/experimentos_schedulings/data_understanding/nets"
+output_folder_2 = "/Users/cristiantobar/Library/CloudStorage/OneDrive-unicauca.edu.co/doctorado_cristian/doctorado_cristian/procesamiento_datos/experimentos_schedulings/data_understanding/nets_closure"
 
 # Ruta del archivo excel consolidado de los proyectos
 ruta_consolidado_proj = "/Users/cristiantobar/Library/CloudStorage/OneDrive-unicauca.edu.co/doctorado_cristian/doctorado_cristian/procesamiento_datos/experimentos_schedulings/DSLIB_Analysis_Scheet.xlsx"
@@ -125,7 +125,38 @@ def extraer_indicadores_por_proyecto(matrices_por_proyecto):
         })
     return pd.DataFrame(resumen)
 
-# Diccionario para guardar matrices Pre y Post
+
+def dibujar_red_petri(pre, post, places, transitions, folder_path, nombre_red="petri_net"):
+    dot = Digraph(format='pdf')
+    dot.attr(rankdir='LR')  # Layout horizontal
+    
+    # Añadir lugares (círculos)
+    for place_id in places:
+        dot.node(place_id, place_id, shape='circle', style='filled', fillcolor='lightblue')
+    
+    # Añadir transiciones (cuadrados)
+    for t_id in transitions:
+        dot.node(t_id, t_id, shape='box', style='filled', fillcolor='lightgreen')
+    
+    # Arcos desde lugares a transiciones (Pre)
+    for i, place in enumerate(places):
+        for j, trans in enumerate(transitions):
+            if pre[i][j] > 0:
+                dot.edge(place, trans, label=str(pre[i][j]) if pre[i][j] > 1 else "")
+    
+    # Arcos desde transiciones a lugares (Post)
+    for i, place in enumerate(places):
+        for j, trans in enumerate(transitions):
+            if post[i][j] > 0:
+                dot.edge(trans, place, label=str(post[i][j]) if post[i][j] > 1 else "")
+    
+    # Guardar o visualizar
+    filename = os.path.join(folder_path, f"{nombre_red}")
+    dot.render(filename, cleanup=True)
+    print(f"✅ Red guardada como {filename}.pdf")
+
+
+      # Diccionario para guardar matrices Pre y Post
 matrices_por_proyecto = {}
 indicadores_estructurales = {}
 
@@ -136,11 +167,11 @@ for file in os.listdir(input_folder):
             file_path = os.path.join(input_folder, file)
             df = pd.read_excel(file_path, sheet_name="Baseline Schedule", header=1)
             df = df.iloc[1:].reset_index(drop=True)
-    
+
             # Filtrar las filas que serán eliminadas (aquellas donde ambas columnas sean NaN)
             df = df[~df[['Predecessors', 'Successors']].isna().all(axis=1)]
             df = df.reset_index(drop=True)
-                        
+
             places = {}
             transitions = {}
             pre_matrix = []
@@ -149,28 +180,17 @@ for file in os.listdir(input_folder):
             transition_indices = {}
             place_counter = 0
             transition_counter = 0
-            # Crear grafo
-            dot = Digraph(format='pdf')
-            dot.attr(rankdir='LR')
-                        
+
             start_nodes = df[pd.isna(df['Predecessors'])]['ID'].astype(str).tolist()
             end_nodes = df[pd.isna(df['Successors'])]['ID'].astype(str).tolist()
-    
+
             # Añadir lugares
             for _, row in df.iterrows():
                 act_id = str(row["ID"])
-                act_name = row["Name"]
-                label = f"P{act_id}\n{act_name}"
                 place_id = f"P{act_id}"
                 place_indices[place_id] = place_counter
                 place_counter += 1
-                if act_id in start_nodes:
-                    dot.node(place_id, label, shape='circle', style='filled', fillcolor='gold')
-                elif act_id in end_nodes:
-                    dot.node(place_id, label, shape='circle', style='filled', fillcolor='red')
-                else:
-                    dot.node(place_id, label, shape='circle', style='filled', fillcolor='lightblue')
-    
+
             # Añadir transiciones
             for _, row in df.iterrows():
                 act_id = str(row["ID"])
@@ -182,35 +202,13 @@ for file in os.listdir(input_folder):
                     pred_id, label = parse_relation(rel.strip())
                     if pred_id is not None:
                         tid = f"T_{pred_id}_{act_id}_{label}"
-                        label_txt = f"T{transition_counter}\n{label}\\n({act_duration})"
                         transition_indices[tid] = transition_counter
                         transition_counter += 1
-                        dot.node(tid, label_txt, shape='box', style='filled', fillcolor='lightgreen')
-                        dot.edge(f"P{pred_id}", tid)
-                        dot.edge(tid, f"P{act_id}")
-                        
+
             # Crear matrices vacías
             pre = np.zeros((len(place_indices), len(transition_indices)), dtype=int)
             post = np.zeros((len(place_indices), len(transition_indices)), dtype=int)
-            
-            # if file == 'C2023-01 House renovation.xlsx':
-            #         # Rellenar matrices Pre y Post
-            #         for t_id, t_idx in transition_indices.items():
-                        
-            #                 match = re.match(r"T_(\d+)_(\d+)_", t_id)
-                            
-            #                 if match:
-            #                     p_from = f"P{match.group(1)}"
-            #                     p_to = f"P{match.group(2)}"
-                                
-            #                 try:
-            #                     if p_from in place_indices:
-            #                         pre[place_indices[p_from], t_idx] = 1
-            #                     if p_to in place_indices:
-            #                         post[place_indices[p_to], t_idx] = 1
-            #                 except Exception as e:
-            #                      breakpoint()
-                
+
             # Rellenar matrices Pre y Post
             for t_id, t_idx in transition_indices.items():
                 match = re.match(r"T_(\d+)_(\d+)_", t_id)
@@ -221,20 +219,41 @@ for file in os.listdir(input_folder):
                         pre[place_indices[p_from], t_idx] = 1
                     if p_to in place_indices:
                         post[place_indices[p_to], t_idx] = 1
-            
+    
+            # Agregar t_reinicio (una sola transición)
+            lugares_finales = [p for p in place_indices if not np.any(pre[place_indices[p], :]) and np.any(post[place_indices[p], :])]
+            lugares_iniciales = [p for p in place_indices if not np.any(post[place_indices[p], :]) and np.any(pre[place_indices[p], :])]
+
+            if lugares_finales and lugares_iniciales:
+                nueva_columna_pre = np.zeros((len(place_indices), 1), dtype=int)
+                nueva_columna_post = np.zeros((len(place_indices), 1), dtype=int)
+
+                for p in lugares_finales:
+                    nueva_columna_pre[place_indices[p], 0] = 1
+                for p in lugares_iniciales:
+                    nueva_columna_post[place_indices[p], 0] = 1
+
+                pre = np.hstack([pre, nueva_columna_pre])
+                post = np.hstack([post, nueva_columna_post])
+                transition_indices["T_reinicio"] = transition_counter
+                transition_counter += 1
+
             matrices_por_proyecto[file] = {
                 "Pre": pre,
                 "Post": post,
                 "places": list(place_indices.keys()),
                 "transitions": list(transition_indices.keys())
             }
-    
+
             df_indicadores = extraer_indicadores_por_proyecto(matrices_por_proyecto)
-            # Guardar gráfico
-            #filename_base = os.path.splitext(file)[0].replace(" ", "_")
-            #output_path = os.path.join(output_folder, f"{filename_base}_petri_net")
-            #dot.render(output_path, cleanup=True)
+            pre = matrices_por_proyecto[file]["Pre"]
+            post = matrices_por_proyecto[file]["Post"]
+            places = matrices_por_proyecto[file]["places"]
+            transitions = matrices_por_proyecto[file]["transitions"]
+            
+            breakpoint()
+            
+            dibujar_red_petri(pre, post, places, transitions, output_folder_2, nombre_red=file.replace(".xlsx", ""))
+            
         except Exception as e:
-            print(f"⚠️ Error procesando {file}: {e}")
-            
-            
+            print(f"\u26a0\ufe0f Error procesando {file}: {e}")      
