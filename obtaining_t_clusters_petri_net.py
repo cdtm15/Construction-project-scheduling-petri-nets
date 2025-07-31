@@ -126,30 +126,27 @@ def extraer_indicadores_por_proyecto(matrices_por_proyecto):
     return pd.DataFrame(resumen)
 
 
-def dibujar_red_petri(pre, post, places, transitions, folder_path, nombre_red="petri_net"):
+def dibujar_red_petri(pre, post, places, transitions, folder_path, place_labels, nombre_red="petri_net"):
     dot = Digraph(format='pdf')
     dot.attr(rankdir='LR')  # Layout horizontal
     
-    # Añadir lugares (círculos)
-    for place_id in places:
-        dot.node(place_id, place_id, shape='circle', style='filled', fillcolor='lightblue')
-    
-    # Añadir transiciones (cuadrados)
-    for t_id in transitions:
-        dot.node(t_id, t_id, shape='box', style='filled', fillcolor='lightgreen')
-    
-    # Arcos desde lugares a transiciones (Pre)
+   # Añadir lugares
+    for i, place in enumerate(places):
+        label = place_labels[place] if place_labels and place in place_labels else place
+        dot.node(place, label=label, shape='circle', style='filled', fillcolor='lightblue')
+
+    # Añadir transiciones
+    for j, trans in enumerate(transitions):
+        dot.node(trans, label=trans, shape='box', style='filled', fillcolor='lightgreen')
+
+    # Añadir arcos
     for i, place in enumerate(places):
         for j, trans in enumerate(transitions):
             if pre[i][j] > 0:
-                dot.edge(place, trans, label=str(pre[i][j]) if pre[i][j] > 1 else "")
-    
-    # Arcos desde transiciones a lugares (Post)
-    for i, place in enumerate(places):
-        for j, trans in enumerate(transitions):
+                dot.edge(place, trans)
             if post[i][j] > 0:
-                dot.edge(trans, place, label=str(post[i][j]) if post[i][j] > 1 else "")
-    
+                dot.edge(trans, place)
+                
     # Guardar o visualizar
     filename = os.path.join(folder_path, f"{nombre_red}")
     dot.render(filename, cleanup=True)
@@ -177,6 +174,7 @@ for file in os.listdir(input_folder):
             pre_matrix = []
             post_matrix = []
             place_indices = {}
+            place_labels = {}
             transition_indices = {}
             place_counter = 0
             transition_counter = 0
@@ -187,8 +185,11 @@ for file in os.listdir(input_folder):
             # Añadir lugares
             for _, row in df.iterrows():
                 act_id = str(row["ID"])
+                act_name = row["Name"] if not pd.isna(row["Name"]) else ""
                 place_id = f"P{act_id}"
+                label = f"{place_id}\n{act_name}"
                 place_indices[place_id] = place_counter
+                place_labels[place_id] = label
                 place_counter += 1
 
             # Añadir transiciones
@@ -219,7 +220,7 @@ for file in os.listdir(input_folder):
                         pre[place_indices[p_from], t_idx] = 1
                     if p_to in place_indices:
                         post[place_indices[p_to], t_idx] = 1
-    
+
             # Agregar t_reinicio (una sola transición)
             lugares_finales = [p for p in place_indices if not np.any(pre[place_indices[p], :]) and np.any(post[place_indices[p], :])]
             lugares_iniciales = [p for p in place_indices if not np.any(post[place_indices[p], :]) and np.any(pre[place_indices[p], :])]
@@ -242,18 +243,19 @@ for file in os.listdir(input_folder):
                 "Pre": pre,
                 "Post": post,
                 "places": list(place_indices.keys()),
-                "transitions": list(transition_indices.keys())
+                "transitions": list(transition_indices.keys()),
+                "place_labels": place_labels
             }
 
             df_indicadores = extraer_indicadores_por_proyecto(matrices_por_proyecto)
+            
             pre = matrices_por_proyecto[file]["Pre"]
             post = matrices_por_proyecto[file]["Post"]
             places = matrices_por_proyecto[file]["places"]
             transitions = matrices_por_proyecto[file]["transitions"]
-            
-            breakpoint()
-            
-            dibujar_red_petri(pre, post, places, transitions, output_folder_2, nombre_red=file.replace(".xlsx", ""))
+            place_labels = matrices_por_proyecto[file]["place_labels"]
+                        
+            dibujar_red_petri(pre, post, places, transitions, output_folder_2, place_labels, nombre_red=file.replace(".xlsx", ""))
             
         except Exception as e:
             print(f"\u26a0\ufe0f Error procesando {file}: {e}")      
